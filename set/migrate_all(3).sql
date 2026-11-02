@@ -1,0 +1,123 @@
+-- ============================================================
+--  まちナビ  差分マイグレーション（まとめ）
+--  既存の本番DBに対して「不足している分だけ」を安全に追加します。
+--  すでに適用済みの項目はスキップされるので、何度流してもエラーになりません。
+--  ※ phpMyAdmin で対象データベースを選び、このSQLをそのまま実行してください。
+--  ※ 新規にゼロから作る場合は schema.sql を使い、これは不要です。
+-- ============================================================
+SET NAMES utf8mb4;
+
+-- 1) shop_staff にスタッフ画像列（image_path）
+SET @sql := IF(
+  (SELECT COUNT(*) FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'shop_staff' AND COLUMN_NAME = 'image_path') = 0,
+  'ALTER TABLE shop_staff ADD COLUMN image_path VARCHAR(255) NOT NULL DEFAULT '''' AFTER message',
+  'DO 0');
+PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
+
+-- 2) users に状態列（status: active / withdrawn）
+SET @sql := IF(
+  (SELECT COUNT(*) FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'status') = 0,
+  'ALTER TABLE users ADD COLUMN status VARCHAR(12) NOT NULL DEFAULT ''active''',
+  'DO 0');
+PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
+
+-- 3) reviews に投稿者(会員)列（user_id）
+SET @sql := IF(
+  (SELECT COUNT(*) FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'reviews' AND COLUMN_NAME = 'user_id') = 0,
+  'ALTER TABLE reviews ADD COLUMN user_id INT NULL AFTER shop_id',
+  'DO 0');
+PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
+
+-- 3b) reviews.user_id のインデックス
+SET @sql := IF(
+  (SELECT COUNT(*) FROM information_schema.STATISTICS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'reviews' AND INDEX_NAME = 'idx_review_user') = 0,
+  'ALTER TABLE reviews ADD KEY idx_review_user (user_id)',
+  'DO 0');
+PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
+
+-- 4) お気に入りテーブル（無ければ作成）
+CREATE TABLE IF NOT EXISTS favorites (
+  user_id    INT NOT NULL,
+  shop_id    INT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, shop_id),
+  CONSTRAINT fk_fav_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_fav_shop FOREIGN KEY (shop_id) REFERENCES shops(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 5) お問い合わせ（無ければ作成）
+CREATE TABLE IF NOT EXISTS inquiries (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  type       VARCHAR(20)  NOT NULL DEFAULT 'other',
+  name       VARCHAR(120) NOT NULL DEFAULT '',
+  email      VARCHAR(190) NOT NULL DEFAULT '',
+  body       TEXT         NOT NULL,
+  user_id    INT NULL,
+  status     ENUM('open','done') NOT NULL DEFAULT 'open',
+  created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_inq (status, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 6) パスワード再設定トークン（無ければ作成）
+CREATE TABLE IF NOT EXISTS password_resets (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  user_id    INT NOT NULL,
+  token_hash CHAR(64) NOT NULL,
+  expires_at DATETIME NOT NULL,
+  used       TINYINT(1) NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_pr_token (token_hash),
+  CONSTRAINT fk_pr_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 7) 会員登録のメール認証（6桁コード保留データ・無ければ作成）
+CREATE TABLE IF NOT EXISTS email_verifications (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  email         VARCHAR(190) NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  nickname      VARCHAR(60)  NOT NULL DEFAULT '',
+  code_hash     CHAR(64)     NOT NULL,
+  attempts      TINYINT      NOT NULL DEFAULT 0,
+  expires_at    DATETIME     NOT NULL,
+  created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_ev_email (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 8) shops に緯度・経度（地図表示用）
+SET @sql := IF(
+  (SELECT COUNT(*) FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'shops' AND COLUMN_NAME = 'lat') = 0,
+  'ALTER TABLE shops ADD COLUMN lat DECIMAL(10,7) NULL AFTER address',
+  'DO 0');
+PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
+SET @sql := IF(
+  (SELECT COUNT(*) FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'shops' AND COLUMN_NAME = 'lng') = 0,
+  'ALTER TABLE shops ADD COLUMN lng DECIMAL(10,7) NULL AFTER lat',
+  'DO 0');
+PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
+
+-- 9) reviews に画像列（口コミ写真）
+SET @sql := IF(
+  (SELECT COUNT(*) FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'reviews' AND COLUMN_NAME = 'image_path') = 0,
+  'ALTER TABLE reviews ADD COLUMN image_path VARCHAR(255) NOT NULL DEFAULT '''' AFTER body',
+  'DO 0');
+PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
+
+-- 10) メールアドレス変更の保留（6桁コード）
+CREATE TABLE IF NOT EXISTS email_changes (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  user_id    INT NOT NULL,
+  new_email  VARCHAR(190) NOT NULL,
+  code_hash  CHAR(64)     NOT NULL,
+  attempts   TINYINT      NOT NULL DEFAULT 0,
+  expires_at DATETIME     NOT NULL,
+  created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_ec_user (user_id),
+  CONSTRAINT fk_ec_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

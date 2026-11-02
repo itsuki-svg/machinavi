@@ -1,0 +1,7 @@
+# admin/.htaccess （Basic認証 + ディレクトリ一覧無効化）
+Options -Indexes
+
+AuthType Basic
+AuthName "Portal Admin"
+AuthUserFile /path/to/.htpasswd
+Require valid-user

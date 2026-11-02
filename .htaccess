@@ -1,0 +1,31 @@
+# .htaccess — セキュリティヘッダー設定
+# mod_headers が無い環境でも 500 にならないよう IfModule で囲っています。
+
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set Referrer-Policy "strict-origin-when-cross-origin"
+  Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+  # HTTPS のときのみ HSTS を付与（半年）
+  Header always set Strict-Transport-Security "max-age=15552000" "expr=%{HTTPS} == 'on'"
+</IfModule>
+
+# HTTP→HTTPS リダイレクト
+# さくらは %{HTTPS}=on を正しく返すためループしません。
+# 万一リダイレクトループが出たら、この IfModule ブロックを削除してください。
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{HTTPS} !=on
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+</IfModule>
+
+# ディレクトリ一覧の無効化
+Options -Indexes
+
+# 機微ファイルへの直接アクセスを拒否（設定・SQL・ログ・.env 等）
+<FilesMatch "(?i)(^config\.php$|^\.env|\.(sql|log|bak|inc|ini|sh|md|env)$)">
+  Require all denied
+</FilesMatch>
+
+# カスタム404
+ErrorDocument 404 /machinavi/404.php

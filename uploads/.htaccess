@@ -1,0 +1,7 @@
+# uploads/.htaccess — スクリプト実行防止
+# 画像のみ置く想定。万一スクリプトが混入しても実行・閲覧させない。
+Options -Indexes -ExecCGI
+
+<FilesMatch "(?i)\.(php|php3|php4|php5|php7|pht|phtml|phar|cgi|pl|py|sh|asp|aspx|jsp)$">
+  Require all denied
+</FilesMatch>
